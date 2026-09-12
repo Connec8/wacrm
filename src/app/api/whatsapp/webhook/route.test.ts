@@ -201,6 +201,15 @@ vi.mock('@/lib/ai/auto-reply', () => ({
 vi.mock('@/lib/webhooks/deliver', () => ({
   dispatchWebhookEvent: h.dispatchWebhookEvent,
 }))
+vi.mock('@/lib/meta/conversions', () => ({
+  dispatchPendingConversions: vi.fn(async () => ({
+    sent: 0,
+    retrying: 0,
+    failed: 0,
+    expired: 0,
+    skipped: 0,
+  })),
+}))
 
 import { POST } from './route'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
@@ -313,6 +322,45 @@ describe('inbound webhook: idempotent insert (#367)', () => {
     expect(h.runAutomationsForTrigger).not.toHaveBeenCalled()
     expect(h.dispatchInboundToAiReply).not.toHaveBeenCalled()
     expect(h.dispatchWebhookEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe('inbound webhook: Click to WhatsApp ad referral', () => {
+  const referral = {
+    source_url: 'https://fb.me/3cr4Wqqkv',
+    source_id: '120226305854810726',
+    source_type: 'ad',
+    body: 'Join this month',
+    headline: 'Chat with us',
+    media_type: 'image',
+    image_url: 'https://scontent.xx.fbcdn.net/v/t45.1',
+    ctwa_clid: 'Aff-n8ZTODiE79d22KtAwQKj9e',
+    welcome_message: { text: 'Hi there!' },
+  }
+
+  it('stores the referral verbatim on the message row', async () => {
+    await runWebhook({ ...TEXT_MESSAGE, referral })
+
+    expect(h.state.upsertCalls[0].row.referral).toEqual(referral)
+  })
+
+  it('includes the referral in the message.received event', async () => {
+    await runWebhook({ ...TEXT_MESSAGE, referral })
+
+    expect(h.dispatchWebhookEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'acc-1',
+      'message.received',
+      expect.objectContaining({ referral }),
+    )
+  })
+
+  it('stores null and leaves the event unchanged for organic messages', async () => {
+    await runWebhook()
+
+    expect(h.state.upsertCalls[0].row.referral).toBeNull()
+    const payload = h.dispatchWebhookEvent.mock.calls[0][3]
+    expect(payload).not.toHaveProperty('referral')
   })
 })
 

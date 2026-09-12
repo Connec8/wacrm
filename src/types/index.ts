@@ -258,6 +258,33 @@ export interface Message {
    * badge in the inbox. Migration 033.
    */
   ai_generated?: boolean;
+  /**
+   * Meta's referral object, verbatim, when this inbound message came
+   * from a Click to WhatsApp ad. Null otherwise. Migration 040.
+   */
+  referral?: MessageReferral | null;
+}
+
+/**
+ * The `referral` object Meta attaches to an inbound message sent from a
+ * Click to WhatsApp ad. Every field is optional because Meta varies the
+ * shape by placement — `ctwa_clid` is omitted for WhatsApp Status ads,
+ * and the media URLs only appear for the matching media type.
+ */
+export interface MessageReferral {
+  /** Ad id. */
+  source_id?: string;
+  source_type?: string;
+  source_url?: string;
+  headline?: string;
+  body?: string;
+  media_type?: string;
+  image_url?: string;
+  video_url?: string;
+  thumbnail_url?: string;
+  /** Click id — what the Conversions API reports events against. */
+  ctwa_clid?: string;
+  welcome_message?: { text?: string };
 }
 
 export type ReactionActor = 'customer' | 'agent';

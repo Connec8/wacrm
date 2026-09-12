@@ -15,6 +15,8 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import { dispatchPendingConversions } from '@/lib/meta/conversions'
+import type { MessageReferral } from '@/types'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -70,6 +72,12 @@ interface WhatsAppMessage {
   button?: { text?: string; payload?: string }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
+  /**
+   * Present when the message came from a Click to WhatsApp ad. Stored
+   * verbatim (migration 040) — `ctwa_clid` is the click id the
+   * Conversions API needs, and Meta offers no way to fetch it later.
+   */
+  referral?: MessageReferral
 }
 
 interface WhatsAppWebhookEntry {
@@ -220,6 +228,15 @@ export async function POST(request: Request) {
       await processWebhook(body)
     } catch (error) {
       console.error('Error processing webhook:', error)
+    }
+    // Piggyback the Meta conversions outbox (migration 041) on webhook
+    // traffic so a won deal is reported within a message or two rather
+    // than waiting for the cron. Separate try so a Meta outage can't
+    // mask an inbound-processing error, or vice versa.
+    try {
+      await dispatchPendingConversions(supabaseAdmin(), { limit: 25 })
+    } catch (error) {
+      console.error('Error dispatching Meta conversions:', error)
     }
   })
 
@@ -717,6 +734,9 @@ async function processMessage(
         // the column; null for every other content_type so existing inserts
         // behave identically.
         interactive_reply_id: interactiveReplyId,
+        // Click to WhatsApp ad attribution (migration 040). Null for
+        // every message that didn't come from an ad.
+        referral: message.referral ?? null,
       },
       { onConflict: 'conversation_id,message_id', ignoreDuplicates: true }
     )
@@ -893,6 +913,9 @@ async function processMessage(
     whatsapp_message_id: message.id,
     content_type: contentType,
     text: contentText,
+    // Only present for ad-originated messages, so existing subscribers
+    // see an unchanged payload for everything else.
+    ...(message.referral ? { referral: message.referral } : {}),
   })
 }
 
